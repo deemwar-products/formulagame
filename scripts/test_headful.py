@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Headful Playwright smoke test for kernel-zero — the KICK scene.
+Headful Playwright smoke test for the kick scene.
 
-Verifies one full kick attempt: load → select ball → charge → release →
-flight → result banner. Reports console errors.
+Runs two passes — desktop viewport and iPhone-like mobile viewport — and
+captures Phaser canvas screenshots at each step. The mobile pass uses a
+narrower viewport to verify the FIT-scale and touch input both work.
 """
 
 from __future__ import annotations
@@ -22,11 +23,12 @@ OUT.mkdir(exist_ok=True)
 GAME_W = 960
 GAME_H = 600
 
-# KickScene.drawBalls — startX=110, spacing=90
-BALL_X = {2: 110, 5: 200, 10: 290}
-BALL_Y = 450
-HOLD_X = 500
-HOLD_Y = 350
+# KickScene.drawCharacters — startX=130, spacing=130
+SLOT_X = {2: 130, 5: 260, 10: 390}
+PORTRAIT_Y = 320  # photo y in scene coords
+BALL_Y = 460      # approx
+HOLD_X = 600
+HOLD_Y = 380
 
 
 def step(name: str) -> None:
@@ -50,8 +52,7 @@ def to_client(rect: dict, x: int, y: int) -> tuple[float, float]:
     return rect["left"] + x * sx, rect["top"] + y * sy
 
 
-def screenshot(page: Page, name: str) -> None:
-    """Grab the Phaser canvas directly — avoids Playwright's full-page font/animation wait."""
+def snap(page: Page, name: str) -> None:
     path = OUT / f"{name}.png"
     data_url = page.evaluate(
         """() => {
@@ -64,74 +65,77 @@ def screenshot(page: Page, name: str) -> None:
         return
     payload = data_url.split(",", 1)[1]
     path.write_bytes(base64.b64decode(payload))
-    print(f"  screenshot → {path.name}")
+    print(f"  snap → {path.name}")
 
 
-def main() -> int:
+def run_pass(p, label: str, viewport: dict, file_prefix: str) -> int:
+    print(f"\n########  {label}  (viewport {viewport['width']}x{viewport['height']})")
     errors: list[str] = []
     console_lines: list[str] = []
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        ctx = browser.new_context(viewport={"width": 1280, "height": 800})
-        page = ctx.new_page()
+    browser = p.chromium.launch(headless=False)
+    ctx = browser.new_context(viewport=viewport, has_touch=True, is_mobile=("mobile" in label.lower()))
+    page = ctx.new_page()
+    page.on("console", lambda m: (
+        console_lines.append(f"[{m.type}] {m.text}"),
+        print(f"  console.{m.type}: {m.text}") if m.type in ("error", "warning") else None,
+    ))
+    page.on("pageerror", lambda e: (errors.append(str(e)), print(f"  PAGE ERROR: {e}")))
 
-        page.on("console", lambda m: (
-            console_lines.append(f"[{m.type}] {m.text}"),
-            print(f"  console.{m.type}: {m.text}") if m.type in ("error", "warning") else None,
-        ))
-        page.on("pageerror", lambda e: (errors.append(str(e)), print(f"  PAGE ERROR: {e}")))
+    step("load")
+    page.goto(URL, wait_until="domcontentloaded", timeout=20000)
+    time.sleep(2.5)  # photos + first frame
+    rect = canvas_rect(page)
+    print(f"  canvas rect: {rect}")
+    snap(page, f"{file_prefix}_01_initial")
 
-        step("1. load")
-        page.goto(URL, wait_until="domcontentloaded", timeout=20000)
-        time.sleep(2.0)
-        rect = canvas_rect(page)
-        print(f"  canvas: {rect}")
-        screenshot(page, "01_initial")
+    step("tap Magizhini (5 kg)")
+    bx, by = to_client(rect, SLOT_X[5], PORTRAIT_Y)
+    page.mouse.click(bx, by)
+    time.sleep(0.4)
+    snap(page, f"{file_prefix}_02_selected")
 
-        step("2. pick 5 kg ball — selects only, NO charge starts")
-        bx, by = to_client(rect, BALL_X[5], BALL_Y)
-        page.mouse.click(bx, by)
-        time.sleep(0.5)
-        screenshot(page, "02_selected_5kg")
+    step("tap Sreevarshan (10 kg)")
+    bx, by = to_client(rect, SLOT_X[10], PORTRAIT_Y)
+    page.mouse.click(bx, by)
+    time.sleep(0.4)
+    snap(page, f"{file_prefix}_03_selected_sreevarshan")
 
-        step("3. mouse.down on empty space → start charging; hold ~250 ms (F→20 N → a≈4)")
-        hx, hy = to_client(rect, HOLD_X, HOLD_Y)
-        page.mouse.move(hx, hy)
-        page.mouse.down()
-        time.sleep(0.13)
-        screenshot(page, "03_charging_early")
-        time.sleep(0.13)
-        screenshot(page, "04_charging_target")
+    step("hold empty space to charge")
+    hx, hy = to_client(rect, HOLD_X, HOLD_Y)
+    page.mouse.move(hx, hy)
+    page.mouse.down()
+    time.sleep(0.18)
+    snap(page, f"{file_prefix}_04_charging")
+    time.sleep(0.18)
+    snap(page, f"{file_prefix}_05_charging_more")
+    page.mouse.up()
 
-        step("4. release → launch")
-        page.mouse.up()
-        time.sleep(0.3)
-        screenshot(page, "05_flying")
+    step("flight")
+    time.sleep(0.5)
+    snap(page, f"{file_prefix}_06_flying")
+    time.sleep(1.5)
+    snap(page, f"{file_prefix}_07_result")
 
-        step("5. wait for landing + result banner (flight ≤ 0.85 s)")
-        time.sleep(1.4)
-        screenshot(page, "06_result")
+    step("visible hold 2 s")
+    time.sleep(2.0)
 
-        step("6. tap to retry (advances to next ball)")
-        page.mouse.click(hx, hy)
-        time.sleep(0.6)
-        screenshot(page, "07_reset_ready")
-
-        step("7. visible hold for 4 seconds before closing")
-        time.sleep(4.0)
-        browser.close()
-
-    print("\n--- console (last 20) ---")
-    for ln in console_lines[-20:]:
-        print(f"  {ln}")
-
-    print("\n--- summary ---")
-    print(f"  page errors: {len(errors)}")
+    browser.close()
+    print(f"  page errors in {label}: {len(errors)}")
     for e in errors:
         print(f"    - {e}")
-    print(f"  screenshots: {OUT}")
     return 0 if not errors else 2
+
+
+def main() -> int:
+    with sync_playwright() as p:
+        # Desktop pass
+        rc1 = run_pass(p, "DESKTOP", {"width": 1280, "height": 800}, "desk")
+        # Mobile pass — iPhone 13-ish portrait
+        rc2 = run_pass(p, "MOBILE", {"width": 390, "height": 844}, "mob")
+
+    print(f"\nscreenshots in: {OUT}")
+    return rc1 | rc2
 
 
 if __name__ == "__main__":

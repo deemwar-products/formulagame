@@ -14,8 +14,17 @@ const config: Phaser.Types.Core.GameConfig = {
   render: {
     antialias: true,
     pixelArt: false,
-    preserveDrawingBuffer: true,
+    powerPreference: "high-performance",
   },
+  fps: {
+    target: 60,
+    forceSetTimeOut: false,
+  },
+  input: {
+    activePointers: 2,
+    touch: { capture: true },
+  },
+  disableContextMenu: true,
   scene: [KickScene],
 };
 
