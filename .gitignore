@@ -6,3 +6,4 @@ dist-tsc
 *.log
 .env
 .env.local
+test-output

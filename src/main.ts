@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { PushScene } from "./scenes/PushScene";
+import { KickScene } from "./scenes/KickScene";
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -14,8 +14,9 @@ const config: Phaser.Types.Core.GameConfig = {
   render: {
     antialias: true,
     pixelArt: false,
+    preserveDrawingBuffer: true,
   },
-  scene: [PushScene],
+  scene: [KickScene],
 };
 
 new Phaser.Game(config);
