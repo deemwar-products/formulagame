@@ -7,3 +7,4 @@ dist-tsc
 .env
 .env.local
 test-output
+.claude
