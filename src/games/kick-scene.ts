@@ -44,13 +44,12 @@ const GOAL_TOP = 290;
 const KEEPER_HOME_X = 830;
 const KEEPER_Y = 410;
 
-// Physics tuning — chosen so a = 4 m/s² (target) makes the ball land in the goal.
+// Physics tuning — per-character launchK is computed at init so the kernel
+// target a=4 makes each character's ball land at the goal mouth.
 const KICK_GRAVITY = 900;
 const KICK_ANGLE = -Math.PI / 3; // 60° upward (screen-y is down)
-// v = K * a → land at goal mouth (~640 px) for a=4. Solve via flat-ground range:
-//   range = v² * sin(2θ) / g   with θ=60° → sin(120°)=√3/2
-//   want range ≈ 640 at a=4 → v=4K → (4K)² * 0.866 / 900 = 640 → K² ≈ 16632 → K ≈ 129
-const VEL_PER_A = 129;
+const GOAL_LANDING_X = 850;      // visual landing target for a=target.value
+const SIN_2THETA = Math.sin(Math.abs(KICK_ANGLE) * 2); // sin(120°)
 
 interface Character {
   mass: number;
@@ -78,6 +77,8 @@ interface Slot extends Character {
   image: HTMLImageElement | null;
   /** scale factor for portrait pop on selection */
   scale: number;
+  /** v = launchK · a; tuned so a=target lands at goal mouth from this slot's baseX. */
+  launchK: number;
 }
 
 export class KickScene implements Scene {
@@ -141,9 +142,13 @@ export class KickScene implements Scene {
   private buildSlots(): void {
     const startX = 130;
     const spacing = 130;
+    const targetA = this.cfg.target.value;
     this.slots = CHARACTERS.map((c, i) => {
       const baseX = startX + i * spacing;
       const baseY = GROUND_Y - 18;
+      // Solve for launchK so range = (launchK · a)² · sin(2θ) / g lands at GOAL_LANDING_X.
+      const range = GOAL_LANDING_X - baseX;
+      const launchK = Math.sqrt((range * KICK_GRAVITY) / (targetA * targetA * SIN_2THETA));
       return {
         ...c,
         baseX,
@@ -153,6 +158,7 @@ export class KickScene implements Scene {
         portraitR: 36,
         image: null,
         scale: 1,
+        launchK,
       };
     });
   }
@@ -166,10 +172,11 @@ export class KickScene implements Scene {
     }
     if (this.state !== "idle") return;
 
+    // Pressing a ball/player switches selection AND starts charging in one motion.
+    // Pressing empty space charges the currently-selected ball.
     const hit = this.hitSlot(x, y);
-    if (hit) {
+    if (hit && hit.mass !== this.selectedMass) {
       this.selectMass(hit.mass);
-      return;
     }
     this.state = "charging";
     this.F = 0;
@@ -227,7 +234,7 @@ export class KickScene implements Scene {
     this.ball.y = startY;
     this.ball.gravity = KICK_GRAVITY;
     this.ball.drag = 0;
-    launchProjectile(this.ball, Math.max(0, a) * VEL_PER_A, KICK_ANGLE);
+    launchProjectile(this.ball, Math.max(0, a) * slot.launchK, KICK_ANGLE);
 
     this.flyRadius = slot.ballRadius;
     this.flyColor = slot.ballColor;
@@ -318,26 +325,25 @@ export class KickScene implements Scene {
     if (this.state === "flying") {
       stepProjectile(this.ball, dt);
       this.flyT += dt;
-      // landed?
+
+      // Early exit: ball cleared the crossbar going up and is past the goal
+      // line — it's over the bar, no need to wait for the slow descent.
+      const clearedCrossbar = this.ball.y < GOAL_TOP - 5 && this.ball.x > GOAL_RIGHT;
+      if (clearedCrossbar) {
+        this.finishFlight("over");
+        return;
+      }
+
       if (this.ball.y >= GROUND_Y - 1) {
-        // Snap to ground for cleaner final frame
         this.ball.y = GROUND_Y - 1;
-        const peakY = this.computePeakY(); // for over-bar detection
-        const result = this.resolveOutcome(this.ball.x, peakY);
+        const result = this.resolveOutcome(this.ball.x, this.ball.y);
         this.finishFlight(result);
-      } else if (this.ball.x > W + 120 || this.flyT > 3.5) {
+      } else if (this.ball.x > W + 60 || this.flyT > 2.5) {
         this.finishFlight("over");
       }
     }
 
     if (this.state === "result") this.bannerSpawn += dt;
-  }
-
-  private computePeakY(): number {
-    // Peak is reached when vy = 0; with vy0 = initial, time = -vy0/g; peakY = startY - vy0² / (2g)
-    // We've been integrating, but we can approximate by min-y seen during flight.
-    // Simpler: just sample y at the apex moment via the kinematic formula.
-    return this.ball.y; // current y is fine for our "did it stay under bar" check
   }
 
   // ---------- render ----------
