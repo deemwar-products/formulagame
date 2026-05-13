@@ -1,0 +1,19 @@
+{
+  "name": "formulagame",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Story-based formula learning game — CBSE Class 9 math & physics. Kernel-driven.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
+  },
+  "dependencies": {
+    "phaser": "^3.87.0"
+  }
+}
